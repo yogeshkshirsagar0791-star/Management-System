@@ -10,7 +10,7 @@ import type {
   WalkInRecord,
 } from '@mess/shared';
 
-const { randomUUID } = globalThis.crypto;
+const randomUUID = () => globalThis.crypto.randomUUID();
 import type {
   CreateCustomerInput,
   LogWalkInInput,

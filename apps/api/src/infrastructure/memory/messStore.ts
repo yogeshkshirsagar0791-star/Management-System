@@ -10,7 +10,7 @@ import {
   WalkInRecord,
 } from '@mess/shared';
 
-const { randomUUID } = globalThis.crypto;
+const randomUUID = () => globalThis.crypto.randomUUID();
 
 const organizationId = 'org-demo';
 
