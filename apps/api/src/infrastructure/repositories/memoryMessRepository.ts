@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import type {
   AttendanceRecord,
   AttendanceSlot,
@@ -10,6 +9,8 @@ import type {
   PlanType,
   WalkInRecord,
 } from '@mess/shared';
+
+const { randomUUID } = globalThis.crypto;
 import type {
   CreateCustomerInput,
   LogWalkInInput,
