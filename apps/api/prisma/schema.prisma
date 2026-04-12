@@ -1,0 +1,87 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Organization {
+  id               String     @id @default(cuid())
+  name             String
+  timezone         String     @default("Asia/Kolkata")
+  currency         String     @default("INR")
+  monthlyMealPrice Int        @default(0)
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+  customers        Customer[]
+  payments         Payment[]
+  attendances      Attendance[]
+  walkIns          WalkIn[]
+}
+
+model Customer {
+  id                   String       @id @default(cuid())
+  organizationId       String
+  organization         Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  messNumber           String
+  name                 String
+  phone                String
+  planType             String
+  active                Boolean      @default(true)
+  monthlySubscription   Int
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+  payments             Payment[]
+  attendances          Attendance[]
+
+  @@unique([organizationId, messNumber])
+  @@index([organizationId, phone])
+  @@index([organizationId, active])
+}
+
+model Payment {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  customerId     String
+  customer       Customer     @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  month          String
+  amount         Int
+  status         String
+  method         String
+  recordedAt     DateTime     @default(now())
+
+  @@index([organizationId, month, status])
+  @@index([organizationId, customerId])
+}
+
+model Attendance {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  customerId     String
+  customer       Customer     @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  date           String
+  slot           String
+  present        Boolean      @default(true)
+
+  @@unique([organizationId, customerId, date, slot])
+  @@index([organizationId, date])
+}
+
+model WalkIn {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  date           String
+  slot           String
+  customerCount  Int
+  planType       String
+  amount         Int
+  paymentMode    String
+  createdAt      DateTime     @default(now())
+
+  @@index([organizationId, date])
+}
