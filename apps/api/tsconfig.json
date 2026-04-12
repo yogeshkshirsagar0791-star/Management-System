@@ -4,8 +4,7 @@
     "rootDir": "../..",
     "outDir": "dist",
     "module": "NodeNext",
-    "moduleResolution": "NodeNext",
-    "types": ["node"]
+    "moduleResolution": "NodeNext"
   },
   "include": ["src"]
 }
