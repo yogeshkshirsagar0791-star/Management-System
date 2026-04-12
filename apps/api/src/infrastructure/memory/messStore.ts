@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import {
   AttendanceRecord,
   AttendanceSlot,
@@ -10,6 +9,8 @@ import {
   PlanType,
   WalkInRecord,
 } from '@mess/shared';
+
+const { randomUUID } = globalThis.crypto;
 
 const organizationId = 'org-demo';
 
