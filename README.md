@@ -31,10 +31,12 @@ Production-oriented full-stack scaffold for a mess serving around 300 customers.
 ## Deployment
 ### 1. Deploy API (Render/Railway)
 1. Deploy `apps/api` as a Node service.
-2. Build command: `npm install ; npm run build --workspace @mess/api`
+2. Build command: `npm install ; npm run prisma:migrate:deploy --workspace @mess/api ; npm run build --workspace @mess/api`
 3. Start command: `npm run start --workspace @mess/api`
 4. Set env vars from `apps/api/.env.example`.
-5. Add `CORS_ORIGINS` with your Vercel frontend URL.
+5. Set `DATABASE_URL` to a real PostgreSQL connection string.
+6. Add `CORS_ORIGINS` with your Vercel frontend URL.
+7. The API creates the default `org-demo` organization on startup.
 
 ### 2. Deploy Web (Vercel)
 1. Import this repository in Vercel.
@@ -43,7 +45,7 @@ Production-oriented full-stack scaffold for a mess serving around 300 customers.
 4. Deploy.
 
 ## Next Steps
-1. Replace the in-memory store with Prisma + PostgreSQL.
+1. Finish PostgreSQL provisioning and keep Prisma migrations in sync.
 2. Add real attendance and payment management screens.
 3. Add reporting exports and WhatsApp notifications.
 4. Add multi-mess tenancy and role-based access.

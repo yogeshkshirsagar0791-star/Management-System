@@ -9,98 +9,84 @@ import type {
   UpdateCustomerInput,
 } from '../domain/messRepository.js';
 import { prismaMessRepository } from '../infrastructure/repositories/prismaMessRepository.js';
-import { memoryMessRepository } from '../infrastructure/repositories/memoryMessRepository.js';
 
 export class MessService {
-  private readonly primaryRepository = process.env.DATABASE_URL ? prismaMessRepository : memoryMessRepository;
-
-  private async withRepositoryFallback<T>(operation: (repository: typeof this.primaryRepository) => Promise<T>) {
-    if (this.primaryRepository === memoryMessRepository) {
-      return operation(memoryMessRepository);
-    }
-
-    try {
-      return await operation(this.primaryRepository);
-    } catch (error) {
-      console.error('Primary repository failed, using memory fallback:', error);
-      return operation(memoryMessRepository);
-    }
-  }
+  private readonly primaryRepository = prismaMessRepository;
 
   async listCustomers(search?: string) {
-    return this.withRepositoryFallback((repository) => repository.listCustomers(search));
+    return this.primaryRepository.listCustomers(search);
   }
 
   async getCustomerByMessNumber(messNumber: string) {
-    return this.withRepositoryFallback((repository) => repository.getCustomerByMessNumber(messNumber));
+    return this.primaryRepository.getCustomerByMessNumber(messNumber);
   }
 
   async createCustomer(input: CreateCustomerInput) {
-    return this.withRepositoryFallback((repository) => repository.createCustomer(input));
+    return this.primaryRepository.createCustomer(input);
   }
 
   async updateCustomer(customerId: string, input: UpdateCustomerInput) {
-    return this.withRepositoryFallback((repository) => repository.updateCustomer(customerId, input));
+    return this.primaryRepository.updateCustomer(customerId, input);
   }
 
   async deleteCustomer(customerId: string) {
-    return this.withRepositoryFallback((repository) => repository.deleteCustomer(customerId));
+    return this.primaryRepository.deleteCustomer(customerId);
   }
 
   async listPayments() {
-    return this.withRepositoryFallback((repository) => repository.listPayments());
+    return this.primaryRepository.listPayments();
   }
 
   async recordPayment(input: RecordPaymentInput) {
-    return this.withRepositoryFallback((repository) => repository.recordPayment(input));
+    return this.primaryRepository.recordPayment(input);
   }
 
   async updatePayment(paymentId: string, input: UpdatePaymentInput) {
-    return this.withRepositoryFallback((repository) => repository.updatePayment(paymentId, input));
+    return this.primaryRepository.updatePayment(paymentId, input);
   }
 
   async deletePayment(paymentId: string) {
-    return this.withRepositoryFallback((repository) => repository.deletePayment(paymentId));
+    return this.primaryRepository.deletePayment(paymentId);
   }
 
   async listDefaulters(month?: string) {
-    return this.withRepositoryFallback((repository) => repository.listDefaulters(month));
+    return this.primaryRepository.listDefaulters(month);
   }
 
   async getMonthlyResetSummary(month?: string) {
-    return this.withRepositoryFallback((repository) => repository.getMonthlyResetSummary(month));
+    return this.primaryRepository.getMonthlyResetSummary(month);
   }
 
   async markAttendance(input: MarkAttendanceInput) {
-    return this.withRepositoryFallback((repository) => repository.markAttendance(input));
+    return this.primaryRepository.markAttendance(input);
   }
 
   async listAttendanceByDate(date?: string, slot?: AttendanceSlot) {
-    return this.withRepositoryFallback((repository) => repository.listAttendanceByDate(date, slot));
+    return this.primaryRepository.listAttendanceByDate(date, slot);
   }
 
   async logWalkIn(input: LogWalkInInput) {
-    return this.withRepositoryFallback((repository) => repository.logWalkIn(input));
+    return this.primaryRepository.logWalkIn(input);
   }
 
   async updateWalkIn(walkInId: string, input: UpdateWalkInInput) {
-    return this.withRepositoryFallback((repository) => repository.updateWalkIn(walkInId, input));
+    return this.primaryRepository.updateWalkIn(walkInId, input);
   }
 
   async deleteWalkIn(walkInId: string) {
-    return this.withRepositoryFallback((repository) => repository.deleteWalkIn(walkInId));
+    return this.primaryRepository.deleteWalkIn(walkInId);
   }
 
   async listWalkInsByDate(date?: string) {
-    return this.withRepositoryFallback((repository) => repository.listWalkInsByDate(date));
+    return this.primaryRepository.listWalkInsByDate(date);
   }
 
   async getDashboardSummary(date?: string, month?: string) {
-    return this.withRepositoryFallback((repository) => repository.getDashboardSummary(date, month));
+    return this.primaryRepository.getDashboardSummary(date, month);
   }
 
   async answerQuery(query: string) {
-    return this.withRepositoryFallback((repository) => repository.answerQuery(query));
+    return this.primaryRepository.answerQuery(query);
   }
 }
 
