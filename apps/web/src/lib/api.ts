@@ -1,6 +1,10 @@
 import type { AttendanceRecord, Customer, DashboardSummary, PaymentMode, PaymentRecord, PlanType, WalkInRecord } from '@mess/shared';
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3001/api';
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? (
+  import.meta.env.PROD
+    ? 'https://mess-api-q2ma.onrender.com/api'
+    : 'http://localhost:3001/api'
+);
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
