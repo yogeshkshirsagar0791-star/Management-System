@@ -35,7 +35,7 @@ export const env = {
   databaseUrl: process.env.DATABASE_URL,
   allowInMemoryFallback: parseBoolean(process.env.ALLOW_IN_MEMORY_FALLBACK, false),
   adminUsername: process.env.ADMIN_USERNAME ?? 'admin',
-  adminPassword: process.env.ADMIN_PASSWORD ?? (process.env.NODE_ENV === 'production' ? undefined : 'admin123'),
+  adminPassword: process.env.ADMIN_PASSWORD,
   authSecret: process.env.AUTH_SECRET ?? (process.env.NODE_ENV === 'production' ? undefined : 'local-dev-auth-secret-change-in-prod'),
   authTokenTtlHours: Number(process.env.AUTH_TOKEN_TTL_HOURS ?? 24),
 };

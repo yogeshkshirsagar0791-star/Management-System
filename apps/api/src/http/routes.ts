@@ -53,7 +53,6 @@ const registerSchema = z.object({
   password: z.string().min(8),
 });
 
-const defaultLocalAdminPassword = 'admin123';
 let runtimeAdminUsername = env.adminUsername;
 let runtimeAdminPassword = env.adminPassword ?? '';
 
@@ -107,7 +106,7 @@ routes.get('/health', (_request: Request, response: Response) => {
 
 routes.get('/auth/setup-status', (_request: Request, response: Response) => {
   const hasConfiguredPassword = Boolean(runtimeAdminPassword);
-  const needsRegistration = !hasConfiguredPassword || runtimeAdminPassword === defaultLocalAdminPassword;
+  const needsRegistration = !hasConfiguredPassword;
   response.json({
     needsRegistration,
     hasAuthSecret: Boolean(env.authSecret),
@@ -121,7 +120,7 @@ routes.post('/auth/register', asyncHandler(async (request: Request, response: Re
   }
 
   const input = registerSchema.parse(request.body);
-  const isAlreadyConfigured = Boolean(runtimeAdminPassword) && runtimeAdminPassword !== defaultLocalAdminPassword;
+  const isAlreadyConfigured = Boolean(runtimeAdminPassword);
   if (isAlreadyConfigured) {
     response.status(409).json({ message: 'Admin is already registered. Please use login.' });
     return;
