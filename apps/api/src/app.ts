@@ -17,6 +17,18 @@ app.use(cors({
       return;
     }
 
+    if (env.nodeEnv !== 'production') {
+      try {
+        const url = new URL(origin);
+        if ((url.hostname === 'localhost' || url.hostname === '127.0.0.1') && url.protocol === 'http:') {
+          callback(null, true);
+          return;
+        }
+      } catch {
+        // Keep the explicit allowlist for malformed origins.
+      }
+    }
+
     callback(new Error(`Origin not allowed by CORS: ${origin}`));
   },
   credentials: true,

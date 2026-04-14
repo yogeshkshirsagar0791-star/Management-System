@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { aiService } from '../application/aiService.js';
 import { messService } from '../application/messService.js';
 import { reportService } from '../application/reportService.js';
+import { env } from '../config/env.js';
+import { createAdminToken, verifyAdminToken } from '../security/auth.js';
 
 const customerSchema = z.object({
   name: z.string().min(1),
@@ -41,6 +43,20 @@ const aiSchema = z.object({
   query: z.string().min(1),
 });
 
+const loginSchema = z.object({
+  username: z.string().min(1),
+  password: z.string().min(1),
+});
+
+const registerSchema = z.object({
+  username: z.string().min(3),
+  password: z.string().min(8),
+});
+
+const defaultLocalAdminPassword = 'admin123';
+let runtimeAdminUsername = env.adminUsername;
+let runtimeAdminPassword = env.adminPassword ?? '';
+
 export const routes = Router();
 
 function asyncHandler(
@@ -55,9 +71,95 @@ function firstParam(value: string | string[] | undefined): string {
   return Array.isArray(value) ? (value[0] ?? '') : (value ?? '');
 }
 
+function extractBearerToken(request: Request): string | undefined {
+  const authorization = request.headers.authorization;
+  if (!authorization) {
+    return undefined;
+  }
+
+  const [scheme, token] = authorization.split(' ');
+  if (scheme?.toLowerCase() !== 'bearer' || !token) {
+    return undefined;
+  }
+
+  return token;
+}
+
+function requireAdminAuth(request: Request, response: Response, next: NextFunction) {
+  const token = extractBearerToken(request);
+  if (!token || !env.authSecret) {
+    response.status(401).json({ message: 'Unauthorized' });
+    return;
+  }
+
+  const payload = verifyAdminToken(token, env.authSecret);
+  if (!payload) {
+    response.status(401).json({ message: 'Unauthorized' });
+    return;
+  }
+
+  next();
+}
+
 routes.get('/health', (_request: Request, response: Response) => {
   response.json({ status: 'ok', service: 'mess-api' });
 });
+
+routes.get('/auth/setup-status', (_request: Request, response: Response) => {
+  const hasConfiguredPassword = Boolean(runtimeAdminPassword);
+  const needsRegistration = !hasConfiguredPassword || runtimeAdminPassword === defaultLocalAdminPassword;
+  response.json({
+    needsRegistration,
+    hasAuthSecret: Boolean(env.authSecret),
+  });
+});
+
+routes.post('/auth/register', asyncHandler(async (request: Request, response: Response) => {
+  if (!env.authSecret) {
+    response.status(500).json({ message: 'AUTH_SECRET is required before admin registration.' });
+    return;
+  }
+
+  const input = registerSchema.parse(request.body);
+  const isAlreadyConfigured = Boolean(runtimeAdminPassword) && runtimeAdminPassword !== defaultLocalAdminPassword;
+  if (isAlreadyConfigured) {
+    response.status(409).json({ message: 'Admin is already registered. Please use login.' });
+    return;
+  }
+
+  runtimeAdminUsername = input.username.trim();
+  runtimeAdminPassword = input.password;
+
+  response.status(201).json({ message: 'Admin registered successfully.' });
+}));
+
+routes.post('/auth/login', asyncHandler(async (request: Request, response: Response) => {
+  if (!runtimeAdminPassword || !env.authSecret) {
+    response.status(500).json({ message: 'Admin authentication is not configured on server.' });
+    return;
+  }
+
+  const input = loginSchema.parse(request.body);
+  if (input.username !== runtimeAdminUsername || input.password !== runtimeAdminPassword) {
+    response.status(401).json({ message: 'Invalid username or password.' });
+    return;
+  }
+
+  const token = createAdminToken(env.authSecret, env.authTokenTtlHours);
+  response.json({ token });
+}));
+
+routes.get('/auth/verify', (request: Request, response: Response) => {
+  const token = extractBearerToken(request);
+  if (!token || !env.authSecret || !verifyAdminToken(token, env.authSecret)) {
+    response.status(401).json({ message: 'Unauthorized' });
+    return;
+  }
+
+  response.json({ authenticated: true });
+});
+
+routes.use(requireAdminAuth);
 
 routes.get('/dashboard/summary', asyncHandler(async (request: Request, response: Response) => {
   const date = typeof request.query.date === 'string' ? request.query.date : undefined;

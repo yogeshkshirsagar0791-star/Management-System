@@ -1,12 +1,14 @@
 import { FormEvent, useEffect, useState } from 'react';
 import type { AttendanceRecord, Customer, DashboardSummary, PaymentRecord, WalkInRecord } from '@mess/shared';
 import {
+  clearAuthToken,
   createCustomer,
   createPayment,
   deleteCustomer,
   deletePayment,
   deleteWalkIn,
   fetchAttendance,
+  fetchAdminSetupStatus,
   fetchCustomerByMessNumber,
   fetchCustomers,
   fetchDashboardSummary,
@@ -15,11 +17,16 @@ import {
   fetchMealReport,
   fetchPayments,
   fetchWalkIns,
+  getAuthToken,
+  loginAdmin,
   logWalkIn,
   markAttendance,
+  registerAdmin,
+  setAuthToken,
   updateWalkIn,
   updateCustomer,
   updatePayment,
+  verifyAdminSession,
 } from './lib/api';
 
 const emptySummary: DashboardSummary = {
@@ -33,23 +40,74 @@ const emptySummary: DashboardSummary = {
   walkInRevenue: 0,
 };
 
-const subscriptionOffers = [
-  { days: 15 as const, amount: 2000, label: '15 days - ₹2000' },
-  { days: 30 as const, amount: 3000, label: '30 days - ₹3000' },
-];
+function formatDisplayDate(value: string): string {
+  if (!value) {
+    return '';
+  }
 
-function getSubscriptionAmount(days: 15 | 30): number {
-  return subscriptionOffers.find((offer) => offer.days === days)?.amount ?? 3000;
+  const displayMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!displayMatch) {
+    return value;
+  }
+
+  const [, year, month, day] = displayMatch;
+  return `${day}/${month}/${year}`;
 }
 
-function calculateSubscriptionEndDate(startDate: string, subscriptionDays: 15 | 30): string {
+function formatDisplayMonth(value: string): string {
+  const [year, month] = value.split('-').map(Number);
+  if (!year || !month) {
+    return value;
+  }
+
+  return `${String(month).padStart(2, '0')}/${year}`;
+}
+
+function parseDisplayDateToIso(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const displayMatch = trimmed.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  const isoMatch = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+
+  let year = 0;
+  let month = 0;
+  let day = 0;
+
+  if (displayMatch) {
+    day = Number(displayMatch[1]);
+    month = Number(displayMatch[2]);
+    year = Number(displayMatch[3]);
+  } else if (isoMatch) {
+    year = Number(isoMatch[1]);
+    month = Number(isoMatch[2]);
+    day = Number(isoMatch[3]);
+  } else {
+    return null;
+  }
+
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (
+    date.getUTCFullYear() !== year
+    || date.getUTCMonth() !== month - 1
+    || date.getUTCDate() !== day
+  ) {
+    return null;
+  }
+
+  return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+function calculateSubscriptionEndDate(startDate: string, days: 15 | 30): string {
   const [year, month, day] = startDate.split('-').map(Number);
   if (!year || !month || !day) {
     return startDate;
   }
 
   const endDate = new Date(Date.UTC(year, month - 1, day));
-  endDate.setUTCDate(endDate.getUTCDate() + subscriptionDays - 1);
+  endDate.setUTCDate(endDate.getUTCDate() + days - 1);
 
   return endDate.toISOString().slice(0, 10);
 }
@@ -57,10 +115,16 @@ function calculateSubscriptionEndDate(startDate: string, subscriptionDays: 15 | 
 function getDurationDaysFromDates(startDate: string, endDate: string): 15 | 30 {
   const start = new Date(`${startDate}T00:00:00Z`);
   const end = new Date(`${endDate}T00:00:00Z`);
-  const diffMs = end.getTime() - start.getTime();
-  const totalDays = Math.floor(diffMs / (1000 * 60 * 60 * 24)) + 1;
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) {
+    return 30;
+  }
 
-  return totalDays <= 15 ? 15 : 30;
+  const durationDays = Math.floor((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+  return durationDays <= 15 ? 15 : 30;
+}
+
+function getSubscriptionAmount(days: 15 | 30): number {
+  return days === 15 ? 1600 : 3200;
 }
 
 function getWalkInPlateRate(date: string): number {
@@ -69,14 +133,13 @@ function getWalkInPlateRate(date: string): number {
 }
 
 function addDaysToDate(date: string, days: number): string {
-  const [year, month, day] = date.split('-').map(Number);
-  if (!year || !month || !day) {
+  const nextDate = new Date(`${date}T00:00:00Z`);
+  if (Number.isNaN(nextDate.getTime())) {
     return date;
   }
 
-  const next = new Date(Date.UTC(year, month - 1, day));
-  next.setUTCDate(next.getUTCDate() + days);
-  return next.toISOString().slice(0, 10);
+  nextDate.setUTCDate(nextDate.getUTCDate() + days);
+  return nextDate.toISOString().slice(0, 10);
 }
 
 function calculateDateRangeDays(goingDate: string, comingDate: string): number {
@@ -102,6 +165,11 @@ const defaultSubscriptionDays: 15 | 30 = 30;
 const defaultSubscriptionEnd = calculateSubscriptionEndDate(defaultSubscriptionStart, defaultSubscriptionDays);
 type ThemeName = 'light' | 'dark' | 'ocean' | 'sunset';
 
+const subscriptionOffers: Array<{ days: 15 | 30; label: string }> = [
+  { days: 15, label: '15 days - ₹1600' },
+  { days: 30, label: '30 days - ₹3200' },
+];
+
 const themeOptions: Array<{ value: ThemeName; label: string }> = [
   { value: 'light', label: 'Light' },
   { value: 'dark', label: 'Dark' },
@@ -121,6 +189,15 @@ export default function App() {
   const [mealReportText, setMealReportText] = useState('');
   const [earningsReportText, setEarningsReportText] = useState('');
   const [loading, setLoading] = useState(true);
+  const [authChecking, setAuthChecking] = useState(true);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [authMode, setAuthMode] = useState<'register' | 'login'>('login');
+  const [mustRegisterAdmin, setMustRegisterAdmin] = useState(false);
+  const [registerUsername, setRegisterUsername] = useState('');
+  const [registerPassword, setRegisterPassword] = useState('');
+  const [registerConfirmPassword, setRegisterConfirmPassword] = useState('');
+  const [loginUsername, setLoginUsername] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const [activeView, setActiveView] = useState<'overview' | 'customers' | 'payments' | 'attendance' | 'walk-ins' | 'dues' | 'vacations' | 'reports'>('overview');
@@ -138,6 +215,7 @@ export default function App() {
   const [customerPlan, setCustomerPlan] = useState<'veg' | 'non-veg'>('veg');
   const [subscriptionDays, setSubscriptionDays] = useState<15 | 30>(defaultSubscriptionDays);
   const [subscriptionStartDate, setSubscriptionStartDate] = useState(defaultSubscriptionStart);
+  const [subscriptionStartDateInput, setSubscriptionStartDateInput] = useState(formatDisplayDate(defaultSubscriptionStart));
   const [subscriptionEndDate, setSubscriptionEndDate] = useState(defaultSubscriptionEnd);
   const [editingCustomerId, setEditingCustomerId] = useState('');
 
@@ -149,15 +227,18 @@ export default function App() {
 
   const [attendanceSlot, setAttendanceSlot] = useState<'breakfast' | 'lunch' | 'dinner'>('lunch');
   const [attendanceDate, setAttendanceDate] = useState(today);
+  const [attendanceDateInput, setAttendanceDateInput] = useState(formatDisplayDate(today));
   const [presentCustomerIds, setPresentCustomerIds] = useState<string[]>([]);
   const [attendanceFilter, setAttendanceFilter] = useState<'all' | 'present' | 'absent'>('all');
   const [attendanceRange, setAttendanceRange] = useState<'all' | '001-100' | '101-200' | '201-300'>('all');
   const [attendanceSearch, setAttendanceSearch] = useState('');
-  const [attendanceHistoryDate, setAttendanceHistoryDate] = useState('');
-  const [attendanceHistorySlot, setAttendanceHistorySlot] = useState<'all' | 'breakfast' | 'lunch' | 'dinner'>('all');
+  const [attendanceHistoryDate, setAttendanceHistoryDate] = useState(today);
+  const [attendanceHistoryDateInput, setAttendanceHistoryDateInput] = useState(formatDisplayDate(today));
+  const [attendanceHistorySlot, setAttendanceHistorySlot] = useState<'all' | 'breakfast' | 'lunch' | 'dinner'>('lunch');
   const [attendanceHistorySearch, setAttendanceHistorySearch] = useState('');
 
   const [walkInDate, setWalkInDate] = useState(today);
+  const [walkInDateInput, setWalkInDateInput] = useState(formatDisplayDate(today));
   const [walkInSlot, setWalkInSlot] = useState<'breakfast' | 'lunch' | 'dinner'>('dinner');
   const [walkInPlan, setWalkInPlan] = useState<'veg' | 'non-veg'>('veg');
   const [walkInCount, setWalkInCount] = useState(1);
@@ -166,7 +247,9 @@ export default function App() {
 
   const [vacationCustomerId, setVacationCustomerId] = useState('');
   const [vacationGoingDate, setVacationGoingDate] = useState(today);
+  const [vacationGoingDateInput, setVacationGoingDateInput] = useState(formatDisplayDate(today));
   const [vacationComingDate, setVacationComingDate] = useState(today);
+  const [vacationComingDateInput, setVacationComingDateInput] = useState(formatDisplayDate(today));
   const [vacationReason, setVacationReason] = useState('Personal reason');
 
   async function loadDashboard() {
@@ -187,6 +270,40 @@ export default function App() {
 
   useEffect(() => {
     void (async () => {
+      const token = getAuthToken();
+      try {
+        const setup = await fetchAdminSetupStatus();
+        setMustRegisterAdmin(setup.needsRegistration);
+        setAuthMode(setup.needsRegistration ? 'register' : 'login');
+      } catch {
+        setMustRegisterAdmin(false);
+      }
+
+      if (!token) {
+        setAuthChecking(false);
+        setLoading(false);
+        return;
+      }
+
+      try {
+        await verifyAdminSession();
+        setIsAuthenticated(true);
+      } catch {
+        clearAuthToken();
+        setIsAuthenticated(false);
+      } finally {
+        setAuthChecking(false);
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setLoading(false);
+      return;
+    }
+
+    void (async () => {
       try {
         await loadDashboard();
       } catch (loadError) {
@@ -195,7 +312,7 @@ export default function App() {
         setLoading(false);
       }
     })();
-  }, []);
+  }, [isAuthenticated]);
 
   useEffect(() => {
     const ids = attendance
@@ -203,6 +320,38 @@ export default function App() {
       .map((record) => record.customerId);
     setPresentCustomerIds(ids);
   }, [attendance, attendanceDate, attendanceSlot]);
+
+  useEffect(() => {
+    setSubscriptionStartDateInput(formatDisplayDate(subscriptionStartDate));
+  }, [subscriptionStartDate]);
+
+  useEffect(() => {
+    setAttendanceDateInput(formatDisplayDate(attendanceDate));
+  }, [attendanceDate]);
+
+  useEffect(() => {
+    setAttendanceHistoryDateInput(attendanceHistoryDate ? formatDisplayDate(attendanceHistoryDate) : '');
+  }, [attendanceHistoryDate]);
+
+  useEffect(() => {
+    setWalkInDateInput(formatDisplayDate(walkInDate));
+  }, [walkInDate]);
+
+  useEffect(() => {
+    setVacationGoingDateInput(formatDisplayDate(vacationGoingDate));
+  }, [vacationGoingDate]);
+
+  useEffect(() => {
+    setVacationComingDateInput(formatDisplayDate(vacationComingDate));
+  }, [vacationComingDate]);
+
+  useEffect(() => {
+    setAttendanceHistoryDate(attendanceDate);
+  }, [attendanceDate]);
+
+  useEffect(() => {
+    setAttendanceHistorySlot(attendanceSlot);
+  }, [attendanceSlot]);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -284,9 +433,62 @@ export default function App() {
     setSubscriptionEndDate(calculateSubscriptionEndDate(startDate, subscriptionDays));
   }
 
+  function handleSubscriptionStartDateInputChange(value: string) {
+    setSubscriptionStartDateInput(value);
+    const parsedIsoDate = parseDisplayDateToIso(value);
+    if (parsedIsoDate) {
+      handleSubscriptionStartDateChange(parsedIsoDate);
+    }
+  }
+
   function handleSubscriptionDaysChange(days: 15 | 30) {
     setSubscriptionDays(days);
     setSubscriptionEndDate(calculateSubscriptionEndDate(subscriptionStartDate, days));
+  }
+
+  function handleAttendanceDateInputChange(value: string) {
+    setAttendanceDateInput(value);
+    const parsedIsoDate = parseDisplayDateToIso(value);
+    if (parsedIsoDate) {
+      setAttendanceDate(parsedIsoDate);
+    }
+  }
+
+  function handleAttendanceHistoryDateInputChange(value: string) {
+    setAttendanceHistoryDateInput(value);
+    if (!value.trim()) {
+      setAttendanceHistoryDate('');
+      return;
+    }
+
+    const parsedIsoDate = parseDisplayDateToIso(value);
+    if (parsedIsoDate) {
+      setAttendanceHistoryDate(parsedIsoDate);
+    }
+  }
+
+  function handleWalkInDateInputChange(value: string) {
+    setWalkInDateInput(value);
+    const parsedIsoDate = parseDisplayDateToIso(value);
+    if (parsedIsoDate) {
+      setWalkInDate(parsedIsoDate);
+    }
+  }
+
+  function handleVacationGoingDateInputChange(value: string) {
+    setVacationGoingDateInput(value);
+    const parsedIsoDate = parseDisplayDateToIso(value);
+    if (parsedIsoDate) {
+      setVacationGoingDate(parsedIsoDate);
+    }
+  }
+
+  function handleVacationComingDateInputChange(value: string) {
+    setVacationComingDateInput(value);
+    const parsedIsoDate = parseDisplayDateToIso(value);
+    if (parsedIsoDate) {
+      setVacationComingDate(parsedIsoDate);
+    }
   }
 
   async function handleCustomerDelete(customerId: string) {
@@ -382,34 +584,43 @@ export default function App() {
     }
   }
 
-  async function handleAttendanceSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError('');
+  async function toggleCustomerPresent(customerId: string) {
     try {
-      const presentSet = new Set(presentCustomerIds);
-      await Promise.all(
-        customers.map((customer) =>
-          markAttendance({
-            customerId: customer.id,
-            date: attendanceDate,
-            slot: attendanceSlot,
-            present: presentSet.has(customer.id),
-          }),
-        ),
-      );
-      await loadDashboard();
-      showSuccess('Attendance saved successfully.');
+      const isCurrentlyPresent = presentCustomerIds.includes(customerId);
+      const newPresentState = !isCurrentlyPresent;
+      
+      // Update UI immediately
+      setPresentCustomerIds((current) => (
+        isCurrentlyPresent
+          ? current.filter((id) => id !== customerId)
+          : [...current, customerId]
+      ));
+      
+      // Record attendance to backend instantly
+      const savedRecord = await markAttendance({
+        customerId,
+        date: attendanceDate,
+        slot: attendanceSlot,
+        present: newPresentState,
+      });
+
+      setAttendance((current) => [
+        ...current.filter((record) => !(
+          record.customerId === savedRecord.customerId
+          && record.date === savedRecord.date
+          && record.slot === savedRecord.slot
+        )),
+        savedRecord,
+      ]);
     } catch (attendanceError) {
       setError(attendanceError instanceof Error ? attendanceError.message : 'Unable to mark attendance');
+      // Revert UI if backend fails
+      setPresentCustomerIds((current) => (
+        current.includes(customerId)
+          ? current.filter((id) => id !== customerId)
+          : [...current, customerId]
+      ));
     }
-  }
-
-  function toggleCustomerPresent(customerId: string) {
-    setPresentCustomerIds((current) => (
-      current.includes(customerId)
-        ? current.filter((id) => id !== customerId)
-        : [...current, customerId]
-    ));
   }
 
   function markAllPresent() {
@@ -545,13 +756,7 @@ export default function App() {
       return messNumber.includes(normalized) || name.includes(normalized);
     })
     .slice()
-    .sort((a, b) => {
-      if (a.present !== b.present) {
-        return a.present ? -1 : 1;
-      }
-
-      return `${b.date}-${b.slot}-${b.id}`.localeCompare(`${a.date}-${a.slot}-${a.id}`);
-    });
+    .reverse();
   const attendanceRate = summary.totalCustomers > 0
     ? Math.round((summary.dailyAttendance / summary.totalCustomers) * 100)
     : 0;
@@ -621,6 +826,133 @@ export default function App() {
     setEditingPaymentId('');
   }
 
+  async function handleAdminLogin(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError('');
+
+    try {
+      const { token } = await loginAdmin({
+        username: loginUsername.trim(),
+        password: loginPassword,
+      });
+
+      setAuthToken(token);
+      setLoginPassword('');
+      setIsAuthenticated(true);
+      setLoading(true);
+      showSuccess('Admin login successful.');
+    } catch (loginError) {
+      setError(loginError instanceof Error ? loginError.message : 'Unable to login as admin.');
+    }
+  }
+
+  async function handleAdminRegister(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError('');
+
+    if (registerPassword !== registerConfirmPassword) {
+      setError('Passwords do not match.');
+      return;
+    }
+
+    try {
+      await registerAdmin({
+        username: registerUsername.trim(),
+        password: registerPassword,
+      });
+
+      setMustRegisterAdmin(false);
+      setLoginUsername(registerUsername.trim());
+      setRegisterUsername('');
+      setRegisterPassword('');
+      setRegisterConfirmPassword('');
+      setAuthMode('login');
+      showSuccess('Admin registration successful. Please login now.');
+    } catch (registerError) {
+      setError(registerError instanceof Error ? registerError.message : 'Unable to register admin.');
+    }
+  }
+
+  function handleLogout() {
+    clearAuthToken();
+    setIsAuthenticated(false);
+    setCustomers([]);
+    setPayments([]);
+    setAttendance([]);
+    setWalkIns([]);
+    setSummary(emptySummary);
+    setLoginPassword('');
+    setSuccessMessage('');
+    setError('');
+  }
+
+  if (authChecking) {
+    return <main className="shell">Checking admin session...</main>;
+  }
+
+  if (!isAuthenticated) {
+    return (
+      <main className="shell">
+        <section className="auth-single">
+          <article className="card auth-card">
+            <div className="card-header">
+              <div>
+                <p className="eyebrow">Mess Management System</p>
+                <h2>{authMode === 'register' ? 'Register Admin' : 'Sign in as Admin'}</h2>
+              </div>
+            </div>
+
+            <div className="auth-mode-switch">
+              <button type="button" className={authMode === 'register' ? 'nav-chip active' : 'nav-chip'} onClick={() => setAuthMode('register')}>Register</button>
+              <button type="button" className={authMode === 'login' ? 'nav-chip active' : 'nav-chip'} onClick={() => setAuthMode('login')} disabled={mustRegisterAdmin}>Login</button>
+            </div>
+
+            {authMode === 'register' ? (
+              <form className="form" onSubmit={handleAdminRegister}>
+                <div className="form-row">
+                  <label>
+                    Admin username
+                    <input value={registerUsername} onChange={(event) => setRegisterUsername(event.target.value)} placeholder="admin" required />
+                  </label>
+                  <label>
+                    Password
+                    <input type="password" value={registerPassword} onChange={(event) => setRegisterPassword(event.target.value)} placeholder="At least 8 characters" minLength={8} required />
+                  </label>
+                  <label>
+                    Confirm password
+                    <input type="password" value={registerConfirmPassword} onChange={(event) => setRegisterConfirmPassword(event.target.value)} placeholder="Re-enter password" minLength={8} required />
+                  </label>
+                </div>
+                <button type="submit">Register Admin</button>
+              </form>
+            ) : (
+              <form className="form" onSubmit={handleAdminLogin}>
+                <div className="form-row">
+                  <label>
+                    Username
+                    <input value={loginUsername} onChange={(event) => setLoginUsername(event.target.value)} placeholder="admin" required />
+                  </label>
+                  <label>
+                    Password
+                    <input type="password" value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} placeholder="••••••••" required />
+                  </label>
+                </div>
+                <button type="submit">Login</button>
+              </form>
+            )}
+          </article>
+        </section>
+
+        {error ? <div className="banner error">{error}</div> : null}
+        {successMessage ? <div className="banner success">{successMessage}</div> : null}
+
+        {mustRegisterAdmin ? (
+          <div className="banner success">Register admin first, then login from the panel beside it.</div>
+        ) : null}
+      </main>
+    );
+  }
+
   if (loading) {
     return <main className="shell">Loading mess dashboard...</main>;
   }
@@ -648,6 +980,7 @@ export default function App() {
             <button type="button" className={theme === 'dark' ? 'nav-chip active' : 'nav-chip'} onClick={toggleDarkMode}>
               {theme === 'dark' ? 'Switch to Light' : 'Switch to Dark'}
             </button>
+            <button type="button" className="nav-chip" onClick={handleLogout}>Logout</button>
           </div>
 
           <div className="hero-panel">
@@ -679,6 +1012,47 @@ export default function App() {
             <StatCard label="Pending payments" value={summary.pendingPayments} />
             <StatCard label="Today attendance" value={summary.dailyAttendance} />
             <StatCard label="Today meal count" value={summary.dailyMealCount} />
+          </section>
+
+          <section className="overview-actions-grid">
+            <article className="card overview-action-card">
+              <div className="card-header">
+                <div>
+                  <p className="eyebrow">Quick Actions</p>
+                  <h2>Jump to the next task</h2>
+                </div>
+              </div>
+              <div className="overview-action-list">
+                <button type="button" className="ghost-button" onClick={() => setActiveView('attendance')}>
+                  Take {attendanceSlot} attendance for {formatDisplayDate(attendanceDate)}
+                </button>
+                <button type="button" className="ghost-button" onClick={() => setActiveView('payments')}>
+                  Record a payment for pending customers
+                </button>
+                <button type="button" className="ghost-button" onClick={() => setActiveView('walk-ins')}>
+                  Log walk-in for {formatDisplayDate(walkInDate)}
+                </button>
+                <button type="button" className="ghost-button" onClick={() => setActiveView('dues')}>
+                  Review dues and renewals
+                </button>
+              </div>
+            </article>
+
+            <article className="card muted overview-action-card">
+              <div className="card-header">
+                <div>
+                  <p className="eyebrow">Today focus</p>
+                  <h2>Operational priorities</h2>
+                </div>
+              </div>
+              <ul className="overview-signal-list">
+                <li><strong>{summary.pendingPayments}</strong><span>payments pending</span></li>
+                <li><strong>{dueNowCount}</strong><span>customers due now</span></li>
+                <li><strong>{nearDueCount}</strong><span>customers due in 7 days</span></li>
+                <li><strong>₹{summary.walkInRevenue}</strong><span>walk-in revenue</span></li>
+                <li><strong>{summary.vegMeals} / {summary.nonVegMeals}</strong><span>veg / non-veg meals</span></li>
+              </ul>
+            </article>
           </section>
 
           <article className="card overview-health">
@@ -749,7 +1123,7 @@ export default function App() {
                       <tr key={student.id}>
                         <td>{student.messNumber}</td>
                         <td>{student.name}</td>
-                        <td>{student.subscriptionEndDate}</td>
+                        <td>{formatDisplayDate(student.subscriptionEndDate)}</td>
                         <td>{student.status === 'due' ? `Overdue by ${Math.abs(student.diffDays)} day(s)` : `${student.diffDays} day(s) left`}</td>
                       </tr>
                     ))}
@@ -803,11 +1177,19 @@ export default function App() {
                 </label>
                 <label>
                   Subscription start date
-                  <input type="date" value={subscriptionStartDate} onChange={(event) => handleSubscriptionStartDateChange(event.target.value)} required />
+                  <input
+                    type="text"
+                    value={subscriptionStartDateInput}
+                    onChange={(event) => handleSubscriptionStartDateInputChange(event.target.value)}
+                    onBlur={() => setSubscriptionStartDateInput(formatDisplayDate(subscriptionStartDate))}
+                    placeholder="dd/mm/yyyy"
+                    inputMode="numeric"
+                    required
+                  />
                 </label>
                 <label>
                   Subscription end date
-                  <input type="date" value={subscriptionEndDate} readOnly required />
+                  <input type="text" value={formatDisplayDate(subscriptionEndDate)} readOnly required />
                 </label>
               </div>
               <button type="submit">{editingCustomerId ? 'Update customer' : 'Save customer'}</button>
@@ -838,7 +1220,7 @@ export default function App() {
                     <th>Start</th>
                     <th>End</th>
                     <th>Actions</th>
-                    <th>Payment ({currentMonth})</th>
+                    <th>Payment ({formatDisplayMonth(currentMonth)})</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -847,8 +1229,8 @@ export default function App() {
                       <td>{customer.messNumber}</td>
                       <td>{customer.name}</td>
                       <td>{customer.planType}</td>
-                      <td>{customer.subscriptionStartDate}</td>
-                      <td>{customer.subscriptionEndDate}</td>
+                      <td>{formatDisplayDate(customer.subscriptionStartDate)}</td>
+                      <td>{formatDisplayDate(customer.subscriptionEndDate)}</td>
                       <td className="row-actions">
                         {!paidCustomerIdsThisMonth.has(customer.id) ? (
                           <button type="button" className="ghost-button" onClick={() => openPaymentForCustomer(customer)}>Record payment</button>
@@ -963,11 +1345,18 @@ export default function App() {
                 <h2>Tap blocks to mark present</h2>
               </div>
             </div>
-            <form className="form" onSubmit={handleAttendanceSubmit}>
+            <form className="form">
               <div className="form-row">
                 <label>
                   Date
-                  <input type="date" value={attendanceDate} onChange={(event) => setAttendanceDate(event.target.value)} />
+                  <input
+                    type="text"
+                    value={attendanceDateInput}
+                    onChange={(event) => handleAttendanceDateInputChange(event.target.value)}
+                    onBlur={() => setAttendanceDateInput(formatDisplayDate(attendanceDate))}
+                    placeholder="dd/mm/yyyy"
+                    inputMode="numeric"
+                  />
                 </label>
                 <label>
                   Slot
@@ -1031,7 +1420,6 @@ export default function App() {
                     );
                   })}
               </div>
-              <button type="submit">Save attendance for all blocks</button>
             </form>
           </article>
 
@@ -1045,7 +1433,14 @@ export default function App() {
             <div className="form-row">
               <label>
                 Filter by date
-                <input type="date" value={attendanceHistoryDate} onChange={(event) => setAttendanceHistoryDate(event.target.value)} />
+                <input
+                  type="text"
+                  value={attendanceHistoryDateInput}
+                  onChange={(event) => handleAttendanceHistoryDateInputChange(event.target.value)}
+                  onBlur={() => setAttendanceHistoryDateInput(attendanceHistoryDate ? formatDisplayDate(attendanceHistoryDate) : '')}
+                  placeholder="dd/mm/yyyy"
+                  inputMode="numeric"
+                />
               </label>
               <label>
                 Filter by slot
@@ -1081,7 +1476,7 @@ export default function App() {
                     const customer = customers.find((item) => item.id === record.customerId);
                     return (
                       <tr key={`history-${record.id}`}>
-                        <td>{record.date}</td>
+                        <td>{formatDisplayDate(record.date)}</td>
                         <td>{record.slot}</td>
                         <td>{customer?.messNumber ?? record.customerId}</td>
                         <td>{customer?.name ?? 'Unknown customer'}</td>
@@ -1114,7 +1509,14 @@ export default function App() {
               <div className="form-row">
                 <label>
                   Date
-                  <input type="date" value={walkInDate} onChange={(event) => setWalkInDate(event.target.value)} />
+                  <input
+                    type="text"
+                    value={walkInDateInput}
+                    onChange={(event) => handleWalkInDateInputChange(event.target.value)}
+                    onBlur={() => setWalkInDateInput(formatDisplayDate(walkInDate))}
+                    placeholder="dd/mm/yyyy"
+                    inputMode="numeric"
+                  />
                 </label>
                 <label>
                   Slot
@@ -1178,7 +1580,7 @@ export default function App() {
                     .sort((a, b) => `${b.date}-${b.id}`.localeCompare(`${a.date}-${a.id}`))
                     .map((record) => (
                       <tr key={record.id}>
-                        <td>{record.date}</td>
+                        <td>{formatDisplayDate(record.date)}</td>
                         <td>{record.slot}</td>
                         <td>{record.planType}</td>
                         <td>{record.customerCount}</td>
@@ -1225,7 +1627,7 @@ export default function App() {
                       <tr key={student.id}>
                         <td>{student.messNumber}</td>
                         <td>{student.name}</td>
-                        <td>{student.subscriptionEndDate}</td>
+                        <td>{formatDisplayDate(student.subscriptionEndDate)}</td>
                         <td>{student.status === 'due' ? `Due (${Math.abs(student.diffDays)} days overdue)` : `Near due (${student.diffDays} days left)`}</td>
                       </tr>
                     ))}
@@ -1262,11 +1664,27 @@ export default function App() {
                 </label>
                 <label>
                   Going date
-                  <input type="date" value={vacationGoingDate} onChange={(event) => setVacationGoingDate(event.target.value)} required />
+                  <input
+                    type="text"
+                    value={vacationGoingDateInput}
+                    onChange={(event) => handleVacationGoingDateInputChange(event.target.value)}
+                    onBlur={() => setVacationGoingDateInput(formatDisplayDate(vacationGoingDate))}
+                    placeholder="dd/mm/yyyy"
+                    inputMode="numeric"
+                    required
+                  />
                 </label>
                 <label>
                   Coming date
-                  <input type="date" value={vacationComingDate} onChange={(event) => setVacationComingDate(event.target.value)} required />
+                  <input
+                    type="text"
+                    value={vacationComingDateInput}
+                    onChange={(event) => handleVacationComingDateInputChange(event.target.value)}
+                    onBlur={() => setVacationComingDateInput(formatDisplayDate(vacationComingDate))}
+                    placeholder="dd/mm/yyyy"
+                    inputMode="numeric"
+                    required
+                  />
                 </label>
                 <label>
                   Reason
@@ -1305,8 +1723,8 @@ export default function App() {
                       <tr key={`vac-${customer.id}`}>
                         <td>{customer.messNumber}</td>
                         <td>{customer.name}</td>
-                        <td>{customer.subscriptionStartDate}</td>
-                        <td>{customer.subscriptionEndDate}</td>
+                        <td>{formatDisplayDate(customer.subscriptionStartDate)}</td>
+                        <td>{formatDisplayDate(customer.subscriptionEndDate)}</td>
                       </tr>
                     ))}
                 </tbody>

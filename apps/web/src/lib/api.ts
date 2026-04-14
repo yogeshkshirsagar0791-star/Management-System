@@ -6,17 +6,45 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL ?? (
     : 'http://localhost:3001/api'
 );
 
+const AUTH_TOKEN_KEY = 'mess_admin_token';
+
+export function getAuthToken(): string {
+  return localStorage.getItem(AUTH_TOKEN_KEY) ?? '';
+}
+
+export function setAuthToken(token: string) {
+  localStorage.setItem(AUTH_TOKEN_KEY, token);
+}
+
+export function clearAuthToken() {
+  localStorage.removeItem(AUTH_TOKEN_KEY);
+}
+
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = getAuthToken();
+  const headers = new Headers(init?.headers);
+  headers.set('Content-Type', 'application/json');
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
+
   const response = await fetch(`${API_BASE}${path}`, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...(init?.headers ?? {}),
-    },
+    headers,
     ...init,
   });
 
   if (!response.ok) {
-    throw new Error(`Request failed with status ${response.status}`);
+    let message = `Request failed with status ${response.status}`;
+    try {
+      const errorPayload = (await response.json()) as { message?: string };
+      if (errorPayload?.message) {
+        message = errorPayload.message;
+      }
+    } catch {
+      // Ignore non-JSON error responses and keep default message.
+    }
+
+    throw new Error(message);
   }
 
   if (response.status === 204) {
@@ -28,6 +56,28 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
 
 export function fetchDashboardSummary() {
   return requestJson<DashboardSummary>('/dashboard/summary');
+}
+
+export function loginAdmin(payload: { username: string; password: string }) {
+  return requestJson<{ token: string }>('/auth/login', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function fetchAdminSetupStatus() {
+  return requestJson<{ needsRegistration: boolean; hasAuthSecret: boolean }>('/auth/setup-status');
+}
+
+export function registerAdmin(payload: { username: string; password: string }) {
+  return requestJson<{ message: string }>('/auth/register', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function verifyAdminSession() {
+  return requestJson<{ authenticated: boolean }>('/auth/verify');
 }
 
 export function fetchCustomers(search?: string) {

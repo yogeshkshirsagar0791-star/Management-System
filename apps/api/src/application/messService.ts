@@ -9,9 +9,11 @@ import type {
   UpdateCustomerInput,
 } from '../domain/messRepository.js';
 import { prismaMessRepository } from '../infrastructure/repositories/prismaMessRepository.js';
+import { memoryMessRepository } from '../infrastructure/repositories/memoryMessRepository.js';
+import { env } from '../config/env.js';
 
 export class MessService {
-  private readonly primaryRepository = prismaMessRepository;
+  private readonly primaryRepository = env.databaseUrl ? prismaMessRepository : memoryMessRepository;
 
   async listCustomers(search?: string) {
     return this.primaryRepository.listCustomers(search);
