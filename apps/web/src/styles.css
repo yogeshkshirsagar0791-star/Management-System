@@ -596,8 +596,12 @@ select {
 
 .report-actions {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 0.75rem;
+}
+
+.report-filter-row {
+  margin-bottom: 0.85rem;
 }
 
 .overview-chip-row {

@@ -6,27 +6,9 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL ?? (
     : 'http://localhost:3001/api'
 );
 
-const AUTH_TOKEN_KEY = 'mess_admin_token';
-
-export function getAuthToken(): string {
-  return localStorage.getItem(AUTH_TOKEN_KEY) ?? '';
-}
-
-export function setAuthToken(token: string) {
-  localStorage.setItem(AUTH_TOKEN_KEY, token);
-}
-
-export function clearAuthToken() {
-  localStorage.removeItem(AUTH_TOKEN_KEY);
-}
-
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const token = getAuthToken();
   const headers = new Headers(init?.headers);
   headers.set('Content-Type', 'application/json');
-  if (token) {
-    headers.set('Authorization', `Bearer ${token}`);
-  }
 
   const response = await fetch(`${API_BASE}${path}`, {
     headers,
@@ -56,28 +38,6 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
 
 export function fetchDashboardSummary() {
   return requestJson<DashboardSummary>('/dashboard/summary');
-}
-
-export function loginAdmin(payload: { username: string; password: string }) {
-  return requestJson<{ token: string }>('/auth/login', {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  });
-}
-
-export function fetchAdminSetupStatus() {
-  return requestJson<{ needsRegistration: boolean; hasAuthSecret: boolean }>('/auth/setup-status');
-}
-
-export function registerAdmin(payload: { username: string; password: string }) {
-  return requestJson<{ message: string }>('/auth/register', {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  });
-}
-
-export function verifyAdminSession() {
-  return requestJson<{ authenticated: boolean }>('/auth/verify');
 }
 
 export function fetchCustomers(search?: string) {
@@ -125,7 +85,7 @@ export function closeMonth(month?: string) {
   });
 }
 
-export function fetchAttendance(date?: string, slot?: 'breakfast' | 'lunch' | 'dinner') {
+export function fetchAttendance(date?: string, slot?: 'lunch' | 'dinner') {
   const query = new URLSearchParams();
   if (date) {
     query.set('date', date);
@@ -138,7 +98,7 @@ export function fetchAttendance(date?: string, slot?: 'breakfast' | 'lunch' | 'd
   return requestJson<AttendanceRecord[]>(`/attendance${suffix}`);
 }
 
-export function markAttendance(payload: { customerId: string; date?: string; slot: 'breakfast' | 'lunch' | 'dinner'; present: boolean }) {
+export function markAttendance(payload: { customerId: string; date?: string; slot: 'lunch' | 'dinner'; present: boolean }) {
   return requestJson<AttendanceRecord>('/attendance', {
     method: 'POST',
     body: JSON.stringify(payload),
@@ -149,14 +109,14 @@ export function fetchWalkIns() {
   return requestJson<WalkInRecord[]>('/walk-ins');
 }
 
-export function logWalkIn(payload: { date?: string; slot: 'breakfast' | 'lunch' | 'dinner'; customerCount: number; planType: PlanType; amount: number; paymentMode: PaymentMode }) {
+export function logWalkIn(payload: { date?: string; slot: 'lunch' | 'dinner'; customerCount: number; planType: PlanType; amount: number; paymentMode: PaymentMode }) {
   return requestJson<WalkInRecord>('/walk-ins', {
     method: 'POST',
     body: JSON.stringify(payload),
   });
 }
 
-export function updateWalkIn(walkInId: string, payload: Partial<{ date: string; slot: 'breakfast' | 'lunch' | 'dinner'; customerCount: number; planType: PlanType; amount: number; paymentMode: PaymentMode }>) {
+export function updateWalkIn(walkInId: string, payload: Partial<{ date: string; slot: 'lunch' | 'dinner'; customerCount: number; planType: PlanType; amount: number; paymentMode: PaymentMode }>) {
   return requestJson<WalkInRecord>(`/walk-ins/${walkInId}`, {
     method: 'PATCH',
     body: JSON.stringify(payload),

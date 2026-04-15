@@ -1,5 +1,5 @@
 export type PlanType = 'veg' | 'non-veg';
-export type AttendanceSlot = 'breakfast' | 'lunch' | 'dinner';
+export type AttendanceSlot = 'lunch' | 'dinner';
 export type PaymentStatus = 'paid' | 'pending';
 export type PaymentMode = 'cash' | 'upi';
 

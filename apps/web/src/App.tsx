@@ -1,14 +1,13 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, TouchEvent, useEffect, useRef, useState } from 'react';
+import { jsPDF } from 'jspdf';
 import type { AttendanceRecord, Customer, DashboardSummary, PaymentRecord, WalkInRecord } from '@mess/shared';
 import {
-  clearAuthToken,
   createCustomer,
   createPayment,
   deleteCustomer,
   deletePayment,
   deleteWalkIn,
   fetchAttendance,
-  fetchAdminSetupStatus,
   fetchCustomerByMessNumber,
   fetchCustomers,
   fetchDashboardSummary,
@@ -17,16 +16,11 @@ import {
   fetchMealReport,
   fetchPayments,
   fetchWalkIns,
-  getAuthToken,
-  loginAdmin,
   logWalkIn,
   markAttendance,
-  registerAdmin,
-  setAuthToken,
   updateWalkIn,
   updateCustomer,
   updatePayment,
-  verifyAdminSession,
 } from './lib/api';
 
 const emptySummary: DashboardSummary = {
@@ -177,6 +171,9 @@ const themeOptions: Array<{ value: ThemeName; label: string }> = [
   { value: 'sunset', label: 'Sunset' },
 ];
 
+const viewOrder = ['overview', 'customers', 'payments', 'attendance', 'walk-ins', 'dues', 'vacations', 'reports'] as const;
+type ActiveView = typeof viewOrder[number];
+
 export default function App() {
   const [summary, setSummary] = useState<DashboardSummary>(emptySummary);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -188,19 +185,13 @@ export default function App() {
   const [dailyReportText, setDailyReportText] = useState('');
   const [mealReportText, setMealReportText] = useState('');
   const [earningsReportText, setEarningsReportText] = useState('');
+  const [reportDate, setReportDate] = useState(today);
+  const [reportDateInput, setReportDateInput] = useState(formatDisplayDate(today));
   const [loading, setLoading] = useState(true);
-  const [authChecking, setAuthChecking] = useState(true);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [authMode, setAuthMode] = useState<'register' | 'login'>('login');
-  const [mustRegisterAdmin, setMustRegisterAdmin] = useState(false);
-  const [registerUsername, setRegisterUsername] = useState('');
-  const [registerPassword, setRegisterPassword] = useState('');
-  const [registerConfirmPassword, setRegisterConfirmPassword] = useState('');
-  const [loginUsername, setLoginUsername] = useState('');
-  const [loginPassword, setLoginPassword] = useState('');
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
-  const [activeView, setActiveView] = useState<'overview' | 'customers' | 'payments' | 'attendance' | 'walk-ins' | 'dues' | 'vacations' | 'reports'>('overview');
+  const [activeView, setActiveView] = useState<ActiveView>('overview');
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
   const [theme, setTheme] = useState<ThemeName>(() => {
     const savedTheme = localStorage.getItem('mess-theme');
     if (savedTheme === 'light' || savedTheme === 'dark' || savedTheme === 'ocean' || savedTheme === 'sunset') {
@@ -225,7 +216,7 @@ export default function App() {
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'upi' | 'bank'>('upi');
   const [editingPaymentId, setEditingPaymentId] = useState('');
 
-  const [attendanceSlot, setAttendanceSlot] = useState<'breakfast' | 'lunch' | 'dinner'>('lunch');
+  const [attendanceSlot, setAttendanceSlot] = useState<'lunch' | 'dinner'>('lunch');
   const [attendanceDate, setAttendanceDate] = useState(today);
   const [attendanceDateInput, setAttendanceDateInput] = useState(formatDisplayDate(today));
   const [presentCustomerIds, setPresentCustomerIds] = useState<string[]>([]);
@@ -234,12 +225,12 @@ export default function App() {
   const [attendanceSearch, setAttendanceSearch] = useState('');
   const [attendanceHistoryDate, setAttendanceHistoryDate] = useState(today);
   const [attendanceHistoryDateInput, setAttendanceHistoryDateInput] = useState(formatDisplayDate(today));
-  const [attendanceHistorySlot, setAttendanceHistorySlot] = useState<'all' | 'breakfast' | 'lunch' | 'dinner'>('lunch');
+  const [attendanceHistorySlot, setAttendanceHistorySlot] = useState<'all' | 'lunch' | 'dinner'>('lunch');
   const [attendanceHistorySearch, setAttendanceHistorySearch] = useState('');
 
   const [walkInDate, setWalkInDate] = useState(today);
   const [walkInDateInput, setWalkInDateInput] = useState(formatDisplayDate(today));
-  const [walkInSlot, setWalkInSlot] = useState<'breakfast' | 'lunch' | 'dinner'>('dinner');
+  const [walkInSlot, setWalkInSlot] = useState<'lunch' | 'dinner'>('dinner');
   const [walkInPlan, setWalkInPlan] = useState<'veg' | 'non-veg'>('veg');
   const [walkInCount, setWalkInCount] = useState(1);
   const [walkInPaymentMode, setWalkInPaymentMode] = useState<'cash' | 'upi'>('cash');
@@ -253,7 +244,7 @@ export default function App() {
   const [vacationReason, setVacationReason] = useState('Personal reason');
 
   async function loadDashboard() {
-      const [summaryData, customerData, paymentData, attendanceData, walkInData] = await Promise.all([
+    const [summaryData, customerData, paymentData, attendanceData, walkInData] = await Promise.all([
       fetchDashboardSummary(),
       fetchCustomers(),
       fetchPayments(),
@@ -270,40 +261,6 @@ export default function App() {
 
   useEffect(() => {
     void (async () => {
-      const token = getAuthToken();
-      try {
-        const setup = await fetchAdminSetupStatus();
-        setMustRegisterAdmin(setup.needsRegistration);
-        setAuthMode(setup.needsRegistration ? 'register' : 'login');
-      } catch {
-        setMustRegisterAdmin(false);
-      }
-
-      if (!token) {
-        setAuthChecking(false);
-        setLoading(false);
-        return;
-      }
-
-      try {
-        await verifyAdminSession();
-        setIsAuthenticated(true);
-      } catch {
-        clearAuthToken();
-        setIsAuthenticated(false);
-      } finally {
-        setAuthChecking(false);
-      }
-    })();
-  }, []);
-
-  useEffect(() => {
-    if (!isAuthenticated) {
-      setLoading(false);
-      return;
-    }
-
-    void (async () => {
       try {
         await loadDashboard();
       } catch (loadError) {
@@ -312,7 +269,7 @@ export default function App() {
         setLoading(false);
       }
     })();
-  }, [isAuthenticated]);
+  }, []);
 
   useEffect(() => {
     const ids = attendance
@@ -346,6 +303,10 @@ export default function App() {
   }, [vacationComingDate]);
 
   useEffect(() => {
+    setReportDateInput(formatDisplayDate(reportDate));
+  }, [reportDate]);
+
+  useEffect(() => {
     setAttendanceHistoryDate(attendanceDate);
   }, [attendanceDate]);
 
@@ -376,6 +337,72 @@ export default function App() {
 
   function toggleDarkMode() {
     setTheme((current) => (current === 'dark' ? 'light' : 'dark'));
+  }
+
+  function goToAdjacentView(direction: 'next' | 'previous') {
+    const currentIndex = viewOrder.indexOf(activeView);
+    if (currentIndex === -1) {
+      return;
+    }
+
+    const delta = direction === 'next' ? 1 : -1;
+    const nextIndex = currentIndex + delta;
+    if (nextIndex < 0 || nextIndex >= viewOrder.length) {
+      return;
+    }
+
+    const nextView = viewOrder[nextIndex];
+    if (!nextView) {
+      return;
+    }
+
+    setActiveView(nextView);
+  }
+
+  function handleShellTouchStart(event: TouchEvent<HTMLElement>) {
+    const target = event.target as HTMLElement | null;
+    if (
+      target?.closest('input, textarea, select, button, a, .table-scroll, .attendance-grid, .quick-nav')
+    ) {
+      touchStartRef.current = null;
+      return;
+    }
+
+    const touch = event.touches[0];
+    if (!touch) {
+      touchStartRef.current = null;
+      return;
+    }
+
+    touchStartRef.current = { x: touch.clientX, y: touch.clientY };
+  }
+
+  function handleShellTouchEnd(event: TouchEvent<HTMLElement>) {
+    const start = touchStartRef.current;
+    touchStartRef.current = null;
+    if (!start) {
+      return;
+    }
+
+    const touch = event.changedTouches[0];
+    if (!touch) {
+      return;
+    }
+
+    const deltaX = touch.clientX - start.x;
+    const deltaY = touch.clientY - start.y;
+    const horizontalDistance = Math.abs(deltaX);
+    const verticalDistance = Math.abs(deltaY);
+
+    if (horizontalDistance < 60 || horizontalDistance < verticalDistance * 1.2) {
+      return;
+    }
+
+    if (deltaX < 0) {
+      goToAdjacentView('next');
+    } else {
+      goToAdjacentView('previous');
+    }
   }
 
   const selectedSubscriptionAmount = getSubscriptionAmount(subscriptionDays);
@@ -488,6 +515,14 @@ export default function App() {
     const parsedIsoDate = parseDisplayDateToIso(value);
     if (parsedIsoDate) {
       setVacationComingDate(parsedIsoDate);
+    }
+  }
+
+  function handleReportDateInputChange(value: string) {
+    setReportDateInput(value);
+    const parsedIsoDate = parseDisplayDateToIso(value);
+    if (parsedIsoDate) {
+      setReportDate(parsedIsoDate);
     }
   }
 
@@ -771,21 +806,237 @@ export default function App() {
   const upcomingDueStudents = dueStudents.slice(0, 6);
 
   async function handleDailyReport() {
-    const report = await fetchDailyReport();
-    setDailyReportText(`Daily report: ${report.summary.dailyMealCount} meals, ${report.attendance.length} attendance entries, ${report.walkIns.length} walk-ins.`);
+    const report = await fetchDailyReport(reportDate);
+    setDailyReportText(`Daily report (${formatDisplayDate(reportDate)}): ${report.summary.dailyMealCount} meals, ${report.attendance.length} attendance entries, ${report.walkIns.length} walk-ins.`);
     showSuccess('Daily report loaded successfully.');
   }
 
   async function handleMealReport() {
-    const report = await fetchMealReport();
-    setMealReportText(`Meals today: ${report.dailyMealCount} total (${report.vegMeals} veg, ${report.nonVegMeals} non-veg).`);
+    const report = await fetchMealReport(reportDate);
+    setMealReportText(`Meals on ${formatDisplayDate(reportDate)}: ${report.dailyMealCount} total (${report.vegMeals} veg, ${report.nonVegMeals} non-veg).`);
     showSuccess('Meal report loaded successfully.');
   }
 
   async function handleEarningsReport() {
-    const report = await fetchEarningsReport();
-    setEarningsReportText(`Today's earnings: ₹${report.totalRevenue} total, ₹${report.subscriptionRevenue} subscriptions, ₹${report.walkInRevenue} walk-ins.`);
+    const report = await fetchEarningsReport(reportDate);
+    setEarningsReportText(`Earnings on ${formatDisplayDate(reportDate)}: ₹${report.totalRevenue} total, ₹${report.subscriptionRevenue} subscriptions, ₹${report.walkInRevenue} walk-ins.`);
     showSuccess('Earnings report loaded successfully.');
+  }
+
+  async function handleDownloadAttendancePdf() {
+    await handleDownloadDataPdf('daily');
+  }
+
+  async function handleDownloadDataPdf(mode: 'daily' | 'weekly' | 'monthly') {
+    setError('');
+    try {
+      const includeAttendance = mode === 'daily';
+      let rangeStartDate = reportDate;
+      let rangeEndDate = reportDate;
+
+      if (mode === 'weekly') {
+        const current = new Date(`${reportDate}T00:00:00Z`);
+        const dayIndex = current.getUTCDay();
+        const daysFromMonday = dayIndex === 0 ? 6 : dayIndex - 1;
+        rangeStartDate = addDaysToDate(reportDate, -daysFromMonday);
+        rangeEndDate = addDaysToDate(rangeStartDate, 6);
+      } else if (mode === 'monthly') {
+        const [parsedYear, parsedMonth] = reportDate.split('-').map(Number);
+        const year = parsedYear || Number(today.slice(0, 4));
+        const month = parsedMonth || Number(today.slice(5, 7));
+        rangeStartDate = `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-01`;
+        const monthEnd = new Date(Date.UTC(year, month, 0));
+        rangeEndDate = monthEnd.toISOString().slice(0, 10);
+      }
+
+      const latestPayments = await fetchPayments();
+      const customerById = new Map(customers.map((customer) => [customer.id, customer]));
+      const paymentsForDate = latestPayments
+        .filter((payment) => payment.recordedAt.slice(0, 10) >= rangeStartDate && payment.recordedAt.slice(0, 10) <= rangeEndDate)
+        .sort((a, b) => b.recordedAt.localeCompare(a.recordedAt));
+      const paidPaymentsForDate = paymentsForDate.filter((payment) => payment.status === 'paid');
+      const walkInsForRange = walkIns
+        .filter((entry) => entry.date >= rangeStartDate && entry.date <= rangeEndDate)
+        .sort((a, b) => b.date.localeCompare(a.date));
+      const attendanceForRange = attendance
+        .filter((entry) => entry.date >= rangeStartDate && entry.date <= rangeEndDate)
+        .sort((a, b) => `${a.date}-${a.slot}`.localeCompare(`${b.date}-${b.slot}`));
+
+      const lunchPresentCount = attendanceForRange.filter((entry) => entry.slot === 'lunch' && entry.present).length;
+      const dinnerPresentCount = attendanceForRange.filter((entry) => entry.slot === 'dinner' && entry.present).length;
+      const paymentTotal = paidPaymentsForDate.reduce((sum, payment) => sum + payment.amount, 0);
+      const walkInTotal = walkInsForRange.reduce((sum, entry) => sum + entry.amount, 0);
+      const totalMeals = attendanceForRange.filter((entry) => entry.present).length + walkInsForRange.reduce((sum, entry) => sum + entry.customerCount, 0);
+      const periodTitle = mode === 'daily' ? 'Daily Operations Receipt' : mode === 'weekly' ? 'Weekly Data Receipt' : 'Monthly Data Receipt';
+
+      const sortedAttendance = attendanceForRange
+        .slice()
+        .sort((a, b) => {
+          const slotCompare = a.slot.localeCompare(b.slot);
+          if (slotCompare !== 0) {
+            return slotCompare;
+          }
+
+          const customerA = customerById.get(a.customerId);
+          const customerB = customerById.get(b.customerId);
+          return (customerA?.messNumber ?? a.customerId).localeCompare(customerB?.messNumber ?? b.customerId);
+        });
+
+      const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+      const left = 12;
+      const right = pageWidth - 12;
+      let y = 14;
+
+      const ensureSpace = (heightNeeded: number) => {
+        if (y + heightNeeded > pageHeight - 14) {
+          doc.addPage();
+          y = 14;
+        }
+      };
+
+      const drawMetricCard = (x: number, title: string, value: string) => {
+        doc.setDrawColor(150, 150, 150);
+        doc.setLineWidth(0.35);
+        doc.roundedRect(x, y, 42, 18, 2, 2, 'S');
+        doc.setFillColor(252, 252, 252);
+        doc.roundedRect(x + 0.2, y + 0.2, 41.6, 17.6, 2, 2, 'F');
+        doc.roundedRect(x, y, 42, 18, 2, 2, 'S');
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(8);
+        doc.setTextColor(92, 92, 92);
+        doc.text(title, x + 2, y + 5);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(12);
+        doc.setTextColor(10, 10, 10);
+        doc.text(value, x + 2, y + 13);
+        doc.setFont('helvetica', 'normal');
+      };
+
+      doc.setFillColor(235, 235, 235);
+      doc.roundedRect(left, y, right - left, 18, 2, 2, 'F');
+      doc.setTextColor(20, 20, 20);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(17);
+      doc.text(periodTitle, left + 3, y + 8);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(10);
+      doc.text(`From: ${formatDisplayDate(rangeStartDate)}  To: ${formatDisplayDate(rangeEndDate)}`, left + 3, y + 14);
+      doc.text(`Generated: ${formatDisplayDate(today)}`, right - 40, y + 14);
+      y += 24;
+
+      ensureSpace(24);
+      drawMetricCard(left, includeAttendance ? 'Lunch Present' : 'Paid Amount', includeAttendance ? `${lunchPresentCount}` : `Rs ${paymentTotal}`);
+      drawMetricCard(left + 45, includeAttendance ? 'Dinner Present' : 'Payments', includeAttendance ? `${dinnerPresentCount}` : `${paidPaymentsForDate.length}`);
+      drawMetricCard(left + 90, 'Paid Entries', `${paidPaymentsForDate.length}`);
+      drawMetricCard(left + 135, mode === 'daily' ? 'Walk-ins Today' : 'Walk-ins', `${walkInsForRange.length}`);
+      y += 24;
+
+      if (includeAttendance) {
+        ensureSpace(10);
+        doc.setTextColor(15, 15, 15);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(11);
+        doc.text('Attendance Details', left, y);
+        y += 5;
+
+        doc.setFillColor(238, 238, 238);
+        doc.rect(left, y - 4, right - left, 7, 'F');
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9);
+        doc.text('Slot', left + 1, y);
+        doc.text('Mess #', left + 24, y);
+        doc.text('Name', left + 44, y);
+        doc.text('Status', right - 25, y);
+        y += 4;
+        doc.setLineWidth(0.4);
+        doc.line(left, y, right, y);
+        y += 4;
+        doc.setFont('helvetica', 'normal');
+
+        for (const record of sortedAttendance) {
+          ensureSpace(6);
+
+          const customer = customerById.get(record.customerId);
+          const customerName = customer?.name ?? 'Unknown customer';
+          const messNumber = customer?.messNumber ?? '--';
+          const status = record.present ? 'Present' : 'Absent';
+
+          doc.setFontSize(9);
+          doc.text(record.slot, left + 1, y);
+          doc.text(messNumber, left + 24, y);
+          doc.text(customerName.slice(0, 32), left + 44, y);
+          doc.text(status, right - 25, y);
+          y += 5;
+        }
+      }
+
+      ensureSpace(12);
+      y += 2;
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.text('Paid Payments (Selected Date)', left, y);
+      y += 5;
+      doc.setFont('helvetica', 'normal');
+
+      if (paidPaymentsForDate.length === 0) {
+        doc.setFontSize(9);
+        doc.text('No paid payments recorded for selected date.', left + 1, y);
+        y += 5;
+      } else {
+        paidPaymentsForDate.forEach((payment) => {
+          ensureSpace(6);
+          const customer = customerById.get(payment.customerId);
+          const customerLabel = customer ? `${customer.messNumber} - ${customer.name}` : payment.customerId;
+          doc.setFontSize(9);
+          doc.text(`${customerLabel.slice(0, 36)} | Rs ${payment.amount} | ${payment.method.toUpperCase()}`, left + 1, y);
+          y += 5;
+        });
+      }
+
+      ensureSpace(12);
+      y += 2;
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.text('Walk-in Entries', left, y);
+      y += 5;
+      doc.setFont('helvetica', 'normal');
+
+      if (walkInsForRange.length === 0) {
+        doc.setFontSize(9);
+        doc.text('No walk-ins for selected period.', left + 1, y);
+        y += 5;
+      } else {
+        walkInsForRange.forEach((entry) => {
+          ensureSpace(6);
+          doc.setFontSize(9);
+          doc.text(`${formatDisplayDate(entry.date)} | ${entry.slot} | ${entry.customerCount} plates | Rs ${entry.amount} | ${entry.paymentMode.toUpperCase()}`, left + 1, y);
+          y += 5;
+        });
+      }
+
+      ensureSpace(24);
+      y += 3;
+      doc.setFillColor(236, 236, 236);
+      doc.roundedRect(left, y, right - left, 18, 2, 2, 'F');
+      doc.setDrawColor(130, 130, 130);
+      doc.setLineWidth(0.45);
+      doc.roundedRect(left, y, right - left, 18, 2, 2, 'S');
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10);
+      doc.text(`Payments total: Rs ${paymentTotal}`, left + 3, y + 6);
+      doc.text(`Walk-ins total: Rs ${walkInTotal}`, left + 3, y + 11);
+      doc.text(`Day revenue: Rs ${paymentTotal + walkInTotal}`, left + 3, y + 16);
+      doc.text(`Meals total: ${totalMeals}${includeAttendance ? ` | lunch ${lunchPresentCount} | dinner ${dinnerPresentCount}` : ' | attendance section hidden'}`, right - 75, y + 16);
+      doc.setFont('helvetica', 'normal');
+
+      const filePrefix = mode === 'daily' ? 'daily' : mode === 'weekly' ? 'weekly' : 'monthly';
+      doc.save(`${filePrefix}-receipt-${rangeStartDate}-to-${rangeEndDate}.pdf`);
+      showSuccess(`${mode.charAt(0).toUpperCase() + mode.slice(1)} receipt PDF downloaded successfully.`);
+    } catch (downloadError) {
+      setError(downloadError instanceof Error ? downloadError.message : 'Unable to download receipt PDF');
+    }
   }
 
   async function handleVacationSubmit(event: FormEvent<HTMLFormElement>) {
@@ -826,139 +1077,12 @@ export default function App() {
     setEditingPaymentId('');
   }
 
-  async function handleAdminLogin(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError('');
-
-    try {
-      const { token } = await loginAdmin({
-        username: loginUsername.trim(),
-        password: loginPassword,
-      });
-
-      setAuthToken(token);
-      setLoginPassword('');
-      setIsAuthenticated(true);
-      setLoading(true);
-      showSuccess('Admin login successful.');
-    } catch (loginError) {
-      setError(loginError instanceof Error ? loginError.message : 'Unable to login as admin.');
-    }
-  }
-
-  async function handleAdminRegister(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError('');
-
-    if (registerPassword !== registerConfirmPassword) {
-      setError('Passwords do not match.');
-      return;
-    }
-
-    try {
-      await registerAdmin({
-        username: registerUsername.trim(),
-        password: registerPassword,
-      });
-
-      setMustRegisterAdmin(false);
-      setLoginUsername(registerUsername.trim());
-      setRegisterUsername('');
-      setRegisterPassword('');
-      setRegisterConfirmPassword('');
-      setAuthMode('login');
-      showSuccess('Admin registration successful. Please login now.');
-    } catch (registerError) {
-      setError(registerError instanceof Error ? registerError.message : 'Unable to register admin.');
-    }
-  }
-
-  function handleLogout() {
-    clearAuthToken();
-    setIsAuthenticated(false);
-    setCustomers([]);
-    setPayments([]);
-    setAttendance([]);
-    setWalkIns([]);
-    setSummary(emptySummary);
-    setLoginPassword('');
-    setSuccessMessage('');
-    setError('');
-  }
-
-  if (authChecking) {
-    return <main className="shell">Checking admin session...</main>;
-  }
-
-  if (!isAuthenticated) {
-    return (
-      <main className="shell">
-        <section className="auth-single">
-          <article className="card auth-card">
-            <div className="card-header">
-              <div>
-                <p className="eyebrow">Mess Management System</p>
-                <h2>{authMode === 'register' ? 'Register Admin' : 'Sign in as Admin'}</h2>
-              </div>
-            </div>
-
-            <div className="auth-mode-switch">
-              <button type="button" className={authMode === 'register' ? 'nav-chip active' : 'nav-chip'} onClick={() => setAuthMode('register')}>Register</button>
-              <button type="button" className={authMode === 'login' ? 'nav-chip active' : 'nav-chip'} onClick={() => setAuthMode('login')} disabled={mustRegisterAdmin}>Login</button>
-            </div>
-
-            {authMode === 'register' ? (
-              <form className="form" onSubmit={handleAdminRegister}>
-                <div className="form-row">
-                  <label>
-                    Admin username
-                    <input value={registerUsername} onChange={(event) => setRegisterUsername(event.target.value)} placeholder="admin" required />
-                  </label>
-                  <label>
-                    Password
-                    <input type="password" value={registerPassword} onChange={(event) => setRegisterPassword(event.target.value)} placeholder="At least 8 characters" minLength={8} required />
-                  </label>
-                  <label>
-                    Confirm password
-                    <input type="password" value={registerConfirmPassword} onChange={(event) => setRegisterConfirmPassword(event.target.value)} placeholder="Re-enter password" minLength={8} required />
-                  </label>
-                </div>
-                <button type="submit">Register Admin</button>
-              </form>
-            ) : (
-              <form className="form" onSubmit={handleAdminLogin}>
-                <div className="form-row">
-                  <label>
-                    Username
-                    <input value={loginUsername} onChange={(event) => setLoginUsername(event.target.value)} placeholder="admin" required />
-                  </label>
-                  <label>
-                    Password
-                    <input type="password" value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} placeholder="••••••••" required />
-                  </label>
-                </div>
-                <button type="submit">Login</button>
-              </form>
-            )}
-          </article>
-        </section>
-
-        {error ? <div className="banner error">{error}</div> : null}
-        {successMessage ? <div className="banner success">{successMessage}</div> : null}
-
-        {mustRegisterAdmin ? (
-          <div className="banner success">Register admin first, then login from the panel beside it.</div>
-        ) : null}
-      </main>
-    );
-  }
-
   if (loading) {
     return <main className="shell">Loading mess dashboard...</main>;
   }
 
   return (
-    <main className="shell">
+    <main className="shell" onTouchStart={handleShellTouchStart} onTouchEnd={handleShellTouchEnd}>
       <section className="hero">
         <div>
           <p className="eyebrow">Mess Management System</p>
@@ -980,7 +1104,6 @@ export default function App() {
             <button type="button" className={theme === 'dark' ? 'nav-chip active' : 'nav-chip'} onClick={toggleDarkMode}>
               {theme === 'dark' ? 'Switch to Light' : 'Switch to Dark'}
             </button>
-            <button type="button" className="nav-chip" onClick={handleLogout}>Logout</button>
           </div>
 
           <div className="hero-panel">
@@ -1360,8 +1483,7 @@ export default function App() {
                 </label>
                 <label>
                   Slot
-                  <select value={attendanceSlot} onChange={(event) => setAttendanceSlot(event.target.value as 'breakfast' | 'lunch' | 'dinner')}>
-                    <option value="breakfast">Breakfast</option>
+                  <select value={attendanceSlot} onChange={(event) => setAttendanceSlot(event.target.value as 'lunch' | 'dinner')}>
                     <option value="lunch">Lunch</option>
                     <option value="dinner">Dinner</option>
                   </select>
@@ -1444,9 +1566,8 @@ export default function App() {
               </label>
               <label>
                 Filter by slot
-                <select value={attendanceHistorySlot} onChange={(event) => setAttendanceHistorySlot(event.target.value as 'all' | 'breakfast' | 'lunch' | 'dinner')}>
+                <select value={attendanceHistorySlot} onChange={(event) => setAttendanceHistorySlot(event.target.value as 'all' | 'lunch' | 'dinner')}>
                   <option value="all">All slots</option>
-                  <option value="breakfast">Breakfast</option>
                   <option value="lunch">Lunch</option>
                   <option value="dinner">Dinner</option>
                 </select>
@@ -1520,8 +1641,7 @@ export default function App() {
                 </label>
                 <label>
                   Slot
-                  <select value={walkInSlot} onChange={(event) => setWalkInSlot(event.target.value as 'breakfast' | 'lunch' | 'dinner')}>
-                    <option value="breakfast">Breakfast</option>
+                  <select value={walkInSlot} onChange={(event) => setWalkInSlot(event.target.value as 'lunch' | 'dinner')}>
                     <option value="lunch">Lunch</option>
                     <option value="dinner">Dinner</option>
                   </select>
@@ -1743,10 +1863,26 @@ export default function App() {
                 <h2>Daily summaries</h2>
               </div>
             </div>
+            <div className="form-row report-filter-row">
+              <label>
+                Report date
+                <input
+                  type="text"
+                  value={reportDateInput}
+                  onChange={(event) => handleReportDateInputChange(event.target.value)}
+                  onBlur={() => setReportDateInput(formatDisplayDate(reportDate))}
+                  placeholder="dd/mm/yyyy"
+                  inputMode="numeric"
+                />
+              </label>
+            </div>
             <div className="report-actions">
               <button type="button" onClick={() => void handleDailyReport()}>Load daily report</button>
               <button type="button" onClick={() => void handleMealReport()}>Load meal summary</button>
               <button type="button" onClick={() => void handleEarningsReport()}>Load earnings</button>
+              <button type="button" onClick={() => void handleDownloadAttendancePdf()}>Download daily receipt PDF</button>
+              <button type="button" onClick={() => void handleDownloadDataPdf('weekly')}>Download weekly data PDF</button>
+              <button type="button" onClick={() => void handleDownloadDataPdf('monthly')}>Download monthly data PDF</button>
             </div>
             {dailyReportText ? <p className="assistant-answer">{dailyReportText}</p> : null}
             {mealReportText ? <p className="assistant-answer">{mealReportText}</p> : null}

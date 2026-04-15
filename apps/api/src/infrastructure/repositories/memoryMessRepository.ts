@@ -66,6 +66,182 @@ const payments: PaymentRecord[] = [];
 const attendance: AttendanceRecord[] = [];
 const walkIns: WalkInRecord[] = [];
 
+function seedApril2026Data() {
+  if (customers.length > 0) {
+    return;
+  }
+
+  const seededCustomers: Array<{
+    messNumber: string;
+    name: string;
+    phone: string;
+    planType: PlanType;
+    monthlySubscription: number;
+    subscriptionStartDate: string;
+    subscriptionEndDate: string;
+  }> = [];
+
+  const seededNames = [
+    'Aman Kumar', 'Priya Sharma', 'Farhan Ali', 'Sneha Patil', 'Rohan Das',
+    'Nisha Verma', 'Karthik Reddy', 'Anjali Gupta', 'Vikram Singh', 'Meera Iyer',
+    'Sahil Khan', 'Pooja Nair', 'Arjun Mehta', 'Kavya Joshi', 'Imran Shaikh',
+    'Neha Bansal', 'Rahul Choudhary', 'Divya Menon', 'Aditya Rao', 'Simran Kaur',
+    'Manish Yadav', 'Ayesha Siddiqui', 'Harsh Vora', 'Tanvi Kulkarni', 'Ritesh Jain',
+    'Bhavna Mishra', 'Rajat Malhotra', 'Sana Mirza', 'Lokesh Tiwari', 'Ishita Sen',
+    'Pranav Naidu', 'Deepika Arora', 'Nitin Sahu', 'Swati Pillai', 'Akash Bhat',
+    'Madhuri Ghosh', 'Yash Kapoor', 'Riya Dutta', 'Abhishek Solanki', 'Komal Agarwal',
+    'Naveen Prasad', 'Shreya Paul', 'Faiz Alam', 'Trisha Roy', 'Varun Kulshrestha',
+    'Payal Deshmukh', 'Jatin Bedi', 'Anamika Sethi', 'Uday Shetty', 'Monika Rawat',
+  ];
+
+  for (let index = 0; index < seededNames.length; index += 1) {
+    const serial = index + 1;
+    const messNumber = String(serial).padStart(3, '0');
+    const planType: PlanType = serial % 3 === 0 ? 'non-veg' : 'veg';
+    const joiningDay = ((serial * 7) % 25) + 1;
+    const subscriptionSpanDays = 14 + ((serial * 5) % 22);
+    const joiningDate = new Date(Date.UTC(2026, 3, joiningDay));
+    const endingDate = new Date(joiningDate);
+    endingDate.setUTCDate(endingDate.getUTCDate() + subscriptionSpanDays);
+
+    seededCustomers.push({
+      messNumber,
+      name: seededNames[index]!,
+      phone: `+91-987650${String(serial).padStart(4, '0')}`,
+      planType,
+      monthlySubscription: planType === 'non-veg' ? 3800 : 3200,
+      subscriptionStartDate: joiningDate.toISOString().slice(0, 10),
+      subscriptionEndDate: endingDate.toISOString().slice(0, 10),
+    });
+  }
+
+  const createdCustomerMap = new Map<string, Customer>();
+
+  for (const entry of seededCustomers) {
+    const customer: Customer = {
+      id: randomUUID(),
+      organizationId,
+      messNumber: entry.messNumber,
+      name: entry.name,
+      phone: entry.phone,
+      planType: entry.planType,
+      active: true,
+      monthlySubscription: entry.monthlySubscription,
+      subscriptionStartDate: entry.subscriptionStartDate,
+      subscriptionEndDate: entry.subscriptionEndDate,
+      createdAt: '2026-04-01T08:00:00.000Z',
+      updatedAt: '2026-04-01T08:00:00.000Z',
+    };
+
+    customers.push(customer);
+    createdCustomerMap.set(entry.messNumber, customer);
+  }
+
+  const seededPayments: Array<{
+    messNumber: string;
+    month: string;
+    amount: number;
+    status: PaymentStatus;
+    method: PaymentMode | 'bank';
+    recordedAt: string;
+  }> = [];
+
+  const paymentModes: Array<PaymentMode | 'bank'> = ['upi', 'cash', 'bank'];
+  for (let index = 0; index < seededCustomers.length; index += 1) {
+    const customer = seededCustomers[index]!;
+    const serial = index + 1;
+    const joiningDay = Number(customer.subscriptionStartDate.slice(-2));
+    const day = Math.min(30, joiningDay + (serial % 6));
+    const hour = 8 + (serial % 5);
+    const minute = (serial * 7) % 60;
+
+    seededPayments.push({
+      messNumber: customer.messNumber,
+      month: '2026-04',
+      amount: customer.monthlySubscription,
+      status: serial % 4 === 0 ? 'pending' : 'paid',
+      method: paymentModes[index % paymentModes.length]!,
+      recordedAt: `2026-04-${String(day).padStart(2, '0')}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00.000Z`,
+    });
+  }
+
+  for (const entry of seededPayments) {
+    const customer = createdCustomerMap.get(entry.messNumber);
+    if (!customer) {
+      continue;
+    }
+
+    payments.push({
+      id: randomUUID(),
+      organizationId,
+      customerId: customer.id,
+      month: entry.month,
+      amount: entry.amount,
+      status: entry.status,
+      recordedAt: entry.recordedAt,
+      method: entry.method,
+    });
+  }
+
+  const attendanceDates = ['2026-04-13', '2026-04-14', '2026-04-15'];
+  const attendanceSlots: AttendanceSlot[] = ['lunch', 'dinner'];
+
+  for (const date of attendanceDates) {
+    for (const slot of attendanceSlots) {
+      for (const customer of customers) {
+        const messSerial = Number(customer.messNumber);
+        const datePart = Number(date.slice(-2));
+        const slotWeight = slot === 'lunch' ? 3 : 5;
+        const isAbsent = (messSerial + datePart + slotWeight) % 11 === 0;
+
+        attendance.push({
+          id: randomUUID(),
+          organizationId,
+          customerId: customer.id,
+          date,
+          slot,
+          present: !isAbsent,
+        });
+      }
+    }
+  }
+
+  walkIns.push(
+    {
+      id: randomUUID(),
+      organizationId,
+      date: '2026-04-13',
+      slot: 'dinner',
+      customerCount: 7,
+      planType: 'non-veg',
+      amount: calculateWalkInAmount('2026-04-13', 7),
+      paymentMode: 'cash',
+    },
+    {
+      id: randomUUID(),
+      organizationId,
+      date: '2026-04-14',
+      slot: 'lunch',
+      customerCount: 5,
+      planType: 'veg',
+      amount: calculateWalkInAmount('2026-04-14', 5),
+      paymentMode: 'upi',
+    },
+    {
+      id: randomUUID(),
+      organizationId,
+      date: '2026-04-15',
+      slot: 'dinner',
+      customerCount: 9,
+      planType: 'non-veg',
+      amount: calculateWalkInAmount('2026-04-15', 9),
+      paymentMode: 'cash',
+    },
+  );
+}
+
+seedApril2026Data();
+
 export class MemoryMessRepository implements MessRepository {
   async listCustomers(search?: string): Promise<Customer[]> {
     const normalized = search?.trim().toLowerCase();

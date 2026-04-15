@@ -144,7 +144,7 @@ const attendance: AttendanceRecord[] = [
     organizationId,
     customerId: customers[0]!.id,
     date: isoDate(),
-    slot: 'breakfast',
+    slot: 'lunch',
     present: true,
   },
   {
@@ -152,7 +152,7 @@ const attendance: AttendanceRecord[] = [
     organizationId,
     customerId: customers[1]!.id,
     date: isoDate(),
-    slot: 'breakfast',
+    slot: 'dinner',
     present: true,
   },
   {

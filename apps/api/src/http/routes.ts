@@ -3,8 +3,6 @@ import { z } from 'zod';
 import { aiService } from '../application/aiService.js';
 import { messService } from '../application/messService.js';
 import { reportService } from '../application/reportService.js';
-import { env } from '../config/env.js';
-import { createAdminToken, verifyAdminToken } from '../security/auth.js';
 
 const customerSchema = z.object({
   name: z.string().min(1),
@@ -26,13 +24,13 @@ const paymentSchema = z.object({
 const attendanceSchema = z.object({
   customerId: z.string().min(1),
   date: z.string().optional(),
-  slot: z.enum(['breakfast', 'lunch', 'dinner']),
+  slot: z.enum(['lunch', 'dinner']),
   present: z.boolean(),
 });
 
 const walkInSchema = z.object({
   date: z.string().optional(),
-  slot: z.enum(['breakfast', 'lunch', 'dinner']),
+  slot: z.enum(['lunch', 'dinner']),
   customerCount: z.number().int().positive(),
   planType: z.enum(['veg', 'non-veg']),
   amount: z.number().nonnegative(),
@@ -42,19 +40,6 @@ const walkInSchema = z.object({
 const aiSchema = z.object({
   query: z.string().min(1),
 });
-
-const loginSchema = z.object({
-  username: z.string().min(1),
-  password: z.string().min(1),
-});
-
-const registerSchema = z.object({
-  username: z.string().min(3),
-  password: z.string().min(8),
-});
-
-let runtimeAdminUsername = env.adminUsername;
-let runtimeAdminPassword = env.adminPassword ?? '';
 
 export const routes = Router();
 
@@ -70,95 +55,9 @@ function firstParam(value: string | string[] | undefined): string {
   return Array.isArray(value) ? (value[0] ?? '') : (value ?? '');
 }
 
-function extractBearerToken(request: Request): string | undefined {
-  const authorization = request.headers.authorization;
-  if (!authorization) {
-    return undefined;
-  }
-
-  const [scheme, token] = authorization.split(' ');
-  if (scheme?.toLowerCase() !== 'bearer' || !token) {
-    return undefined;
-  }
-
-  return token;
-}
-
-function requireAdminAuth(request: Request, response: Response, next: NextFunction) {
-  const token = extractBearerToken(request);
-  if (!token || !env.authSecret) {
-    response.status(401).json({ message: 'Unauthorized' });
-    return;
-  }
-
-  const payload = verifyAdminToken(token, env.authSecret);
-  if (!payload) {
-    response.status(401).json({ message: 'Unauthorized' });
-    return;
-  }
-
-  next();
-}
-
 routes.get('/health', (_request: Request, response: Response) => {
   response.json({ status: 'ok', service: 'mess-api' });
 });
-
-routes.get('/auth/setup-status', (_request: Request, response: Response) => {
-  const hasConfiguredPassword = Boolean(runtimeAdminPassword);
-  const needsRegistration = !hasConfiguredPassword;
-  response.json({
-    needsRegistration,
-    hasAuthSecret: Boolean(env.authSecret),
-  });
-});
-
-routes.post('/auth/register', asyncHandler(async (request: Request, response: Response) => {
-  if (!env.authSecret) {
-    response.status(500).json({ message: 'AUTH_SECRET is required before admin registration.' });
-    return;
-  }
-
-  const input = registerSchema.parse(request.body);
-  const isAlreadyConfigured = Boolean(runtimeAdminPassword);
-  if (isAlreadyConfigured) {
-    response.status(409).json({ message: 'Admin is already registered. Please use login.' });
-    return;
-  }
-
-  runtimeAdminUsername = input.username.trim();
-  runtimeAdminPassword = input.password;
-
-  response.status(201).json({ message: 'Admin registered successfully.' });
-}));
-
-routes.post('/auth/login', asyncHandler(async (request: Request, response: Response) => {
-  if (!runtimeAdminPassword || !env.authSecret) {
-    response.status(500).json({ message: 'Admin authentication is not configured on server.' });
-    return;
-  }
-
-  const input = loginSchema.parse(request.body);
-  if (input.username !== runtimeAdminUsername || input.password !== runtimeAdminPassword) {
-    response.status(401).json({ message: 'Invalid username or password.' });
-    return;
-  }
-
-  const token = createAdminToken(env.authSecret, env.authTokenTtlHours);
-  response.json({ token });
-}));
-
-routes.get('/auth/verify', (request: Request, response: Response) => {
-  const token = extractBearerToken(request);
-  if (!token || !env.authSecret || !verifyAdminToken(token, env.authSecret)) {
-    response.status(401).json({ message: 'Unauthorized' });
-    return;
-  }
-
-  response.json({ authenticated: true });
-});
-
-routes.use(requireAdminAuth);
 
 routes.get('/dashboard/summary', asyncHandler(async (request: Request, response: Response) => {
   const date = typeof request.query.date === 'string' ? request.query.date : undefined;
@@ -252,7 +151,7 @@ routes.delete('/payments/:id', asyncHandler(async (request: Request, response: R
 routes.get('/attendance', asyncHandler(async (request: Request, response: Response) => {
   const date = typeof request.query.date === 'string' ? request.query.date : undefined;
   const slot = typeof request.query.slot === 'string' ? request.query.slot : undefined;
-  response.json(await messService.listAttendanceByDate(date, slot as 'breakfast' | 'lunch' | 'dinner' | undefined));
+  response.json(await messService.listAttendanceByDate(date, slot as 'lunch' | 'dinner' | undefined));
 }));
 
 routes.post('/attendance', asyncHandler(async (request: Request, response: Response) => {
